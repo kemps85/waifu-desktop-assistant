@@ -232,6 +232,14 @@ def test_overlay_flags_and_bubble(app, cfg):
     assert w.bubble.isHidden() and w.vi_label.text() == ""
 
 
+def test_fit_keeps_window_inside_screen(app, cfg):
+    w = MainWindow(FakeEngine(), cfg)
+    geo = app.primaryScreen().availableGeometry()
+    w._anchor = geo.bottomRight() + QPoint(0, 80)   # góc neo nằm sau taskbar (bật cùng máy lúc taskbar chưa có)
+    w._fit()
+    assert w.geometry().bottom() <= geo.bottom() and w.geometry().right() <= geo.right()
+
+
 def test_bubble_timer_follows_speaker(app, cfg):
     w = MainWindow(FakeEngine(), cfg, FakeSpeaker())
     w.on_say("happy", "あ", "A")

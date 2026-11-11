@@ -10,7 +10,7 @@ import traceback
 import urllib.parse
 from pathlib import Path
 
-from PySide6.QtCore import QLockFile, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QLockFile, QPoint, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton,
@@ -215,6 +215,7 @@ class MainWindow(QWidget):
             lay.addWidget(w)
         self._show_avatar("normal")
         self._anchor = QApplication.primaryScreen().availableGeometry().bottomRight()   # góc đáy-phải cửa sổ
+        QApplication.primaryScreen().availableGeometryChanged.connect(lambda _: self._fit())   # taskbar hiện muộn
         self._fit()
 
         if recorder is None or make_stt is None:
@@ -232,7 +233,11 @@ class MainWindow(QWidget):
     # --- bố cục / bong bóng -------------------------------------------------
     def _fit(self) -> None:
         """Co cửa sổ vừa nội dung, giữ nguyên góc đáy-phải (self._anchor) nên cửa sổ luôn nằm trong màn hình."""
-        anchor = self._anchor
+        # ép vào vùng màn hình hiện tại: bật cùng máy thì taskbar chưa có, góc neo lúc đầu nằm sau taskbar -> mất chân
+        scr = QApplication.screenAt(self._anchor) or QApplication.primaryScreen()
+        geo = scr.availableGeometry()
+        anchor = self._anchor = QPoint(min(max(self._anchor.x(), geo.left() + WIN_W - 1), geo.right()),
+                                       min(self._anchor.y(), geo.bottom()))
         lay = self.layout()
         lay.invalidate()
         lay.activate()
