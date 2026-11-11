@@ -15,10 +15,18 @@ CFG = {"vision": {"base_url": "http://x:1/", "model": "m", "timeout_s": 7}}
 
 
 def test_should_glance():
-    assert vision.should_glance(10, 2000, 360, 7000)
-    assert vision.should_glance(10, None, 360, 7000)        # không có nvidia-smi -> vẫn liếc
-    assert not vision.should_glance(361, 2000, 360, 7000)   # đi vắng
-    assert not vision.should_glance(10, 7001, 360, 7000)    # đang chơi game
+    assert vision.should_glance(10, 360, False)
+    assert not vision.should_glance(361, 360, False)   # đi vắng
+    assert vision.should_glance(10_000, 360, True)     # xem phim toàn màn hình, không chạm chuột vẫn liếc
+
+
+def test_describe_cpu_option(monkeypatch):
+    sent = []
+    monkeypatch.setattr(vision.urllib.request, "urlopen", lambda req, timeout: sent.append(json.loads(req.data))
+                        or io.BytesIO(b'{"message": {"content": "x"}}'))
+    vision.describe(b"x", CFG, cpu=True)
+    vision.describe(b"x", CFG)
+    assert sent[0]["options"]["num_gpu"] == 0 and "num_gpu" not in sent[1]["options"]
 
 
 def test_is_private():

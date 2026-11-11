@@ -333,7 +333,8 @@ def seer(app, cfg):
         w = MainWindow(engine or RecEngine(), cfg)
         w.calls = []
         w.grab = lambda: b"jpeg"
-        w.describe = lambda jpeg, c, q="": w.calls.append((jpeg, q)) or summary
+        w.describe = lambda jpeg, c, q="", cpu=False: w.calls.append((jpeg, q)) or w.cpu.append(cpu) or summary
+        w.cpu = []
         made.append(w)
         return w
 
@@ -377,7 +378,7 @@ def test_look_proactive_carries_last_seen_and_stays_silent(app, seer):
 def test_look_failure_on_demand_shows_error_proactive_silent(app, seer):
     w = seer()
 
-    def boom(*a):
+    def boom(*a, **k):
         raise RuntimeError("ollama tắt")
 
     w.describe = boom
@@ -435,13 +436,18 @@ def test_glance_tick_conditions(app, seer, monkeypatch):
     monkeypatch.setattr(ui.vision, "idle_seconds", lambda: state["idle"])
     monkeypatch.setattr(ui.vision, "vram_used_mb", lambda: state["vram"])
     monkeypatch.setattr(ui.vision, "foreground_title", lambda: state.get("title", "YouTube - Chrome"))
+    monkeypatch.setattr(ui.vision, "foreground_fullscreen", lambda: state.get("fs", False))
     w.glance_tick()
     assert wait_for(app, lambda: len(w.calls) == 1)
     wait_for(app, lambda: not w.worker.isRunning())
     state["idle"] = 10_000                # đi vắng
     w.glance_tick()
-    state["idle"], state["vram"] = 5, 9000    # đang chơi game
+    state["idle"], state["vram"], state["fs"] = 10_000, 9000, True   # chơi game toàn màn hình: vẫn liếc, chạy CPU
     w.glance_tick()
+    assert wait_for(app, lambda: len(w.calls) == 2) and w.cpu == [False, True]
+    wait_for(app, lambda: not w.worker.isRunning())
+    state["idle"], state["fs"] = 5, False
+    w.calls.clear()
     w.vision_on, state["vram"] = False, 1000  # đã tắt
     w.glance_tick()
     w.vision_on, state["title"] = True, "Vietcombank - Google Chrome"   # cửa sổ riêng tư
@@ -449,7 +455,22 @@ def test_glance_tick_conditions(app, seer, monkeypatch):
     state["title"], w.recording = "YouTube", True    # đang thu âm
     w.glance_tick()
     app.processEvents()
-    assert len(w.calls) == 1
+    assert w.calls == []
+
+
+def test_raises_when_speaking_then_sinks(app, cfg, monkeypatch):
+    w = MainWindow(FakeEngine(), cfg)
+    calls = []
+    monkeypatch.setattr(ui, "set_topmost", lambda win, on: calls.append(on))
+    w.on_say("happy", "あ", "A")
+    assert calls[-1] is True and w.hide_timer.interval() == 5000
+    w._hide_bubble()
+    assert calls[-1] is False
+    w.on_say("happy", "あ", "A" * 200)
+    assert w.hide_timer.interval() == 10000       # câu dài giữ lâu hơn, tối đa 10 s
+    w.pinned = True
+    w._hide_bubble()
+    assert calls[-1] is True                      # đang ghim thì không lặn
 
 
 def test_vision_defaults_from_config(app, cfg):

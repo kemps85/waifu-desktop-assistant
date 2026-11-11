@@ -23,7 +23,7 @@ from waifu.llm import LLMError
 
 AVATAR_H = 300      # chiều cao chibi (px)
 WIN_W = 400
-BUBBLE_MS = 6000    # bong bóng tự ẩn sau chừng này ms
+BUBBLE_MS, BUBBLE_MAX_MS = 5000, 10000   # bong bóng tự ẩn sau 5-10 s tuỳ độ dài câu
 TALK_VK = {"right_ctrl": 0xA3, "right_alt": 0xA5, **{f"f{i}": 0x6F + i for i in range(2, 13)}}
 TALK_NAME = {"right_ctrl": "Ctrl phải", "right_alt": "Alt phải"}
 
@@ -123,11 +123,20 @@ def wait_port(host: str, port: int, timeout: float, stop: threading.Event) -> No
         stop.wait(0.5)
 
 
+# gợi ý ngẫu nhiên mỗi lượt tự phát để cô ấy không lặp một kiểu (vẫn trong tính cách)
+GLANCE_ANGLES = ["trêu nhẹ", "tò mò hỏi một điều cụ thể về thứ họ đang xem/làm", "nói cảm nghĩ của chính mình về nó",
+                 "phản ứng ngắn như đang xem cùng (một tiếng cảm thán cũng được)", "nhắc khéo nghỉ ngơi nếu hợp lúc",
+                 "liên hệ với điều bạn nhớ về họ", "cổ vũ họ"]
+GREET_ANGLES = ["hỏi hôm nay họ định làm gì", "kể nhẹ một chuyện nhỏ của mình", "trêu nhẹ", "chào ngắn gọn thân mật",
+                "tỏ ra vui vì họ đến", "hỏi han sức khoẻ, giấc ngủ"]
+
+
 def greet_prompt() -> str:
     h = time.localtime().tm_hour
     part = "khuya" if h < 5 else "sáng" if h < 11 else "trưa" if h < 14 else "chiều" if h < 18 else "tối"
-    return (f"(Hệ thống: người dùng vừa mở máy, đang là buổi {part}. Hãy chào họ một câu ngắn, "
-            "không nhắc giờ giấc cụ thể hay lần mở máy trước, không thực hiện hành động nào.)")
+    return (f"(Hệ thống: người dùng vừa mở máy, đang là buổi {part}. Hãy chào họ một câu ngắn, lần này theo kiểu: "
+            f"{random.choice(GREET_ANGLES)}. Không nhắc giờ giấc cụ thể hay lần mở máy trước, "
+            "không thực hiện hành động nào.)")
 
 
 class MainWindow(QWidget):
@@ -235,6 +244,13 @@ class MainWindow(QWidget):
     def _show_bubble(self) -> None:
         self.bubble.setVisible(bool(self.vi_label.text() or self.ja_label.text()))
         self._fit()
+        if not self.bubble.isHidden():
+            set_topmost(self, True)   # có gì để nói -> nổi lên trên cả game/phim toàn màn hình (không độc quyền)
+
+    def _sink(self) -> None:
+        """Nói xong, không ghim, không mở ô chat -> lặn xuống dưới cho khỏi vướng."""
+        if not self.pinned and self.row.isHidden() and self.bubble.isHidden():
+            set_topmost(self, False)
 
     def _note(self, text: str) -> None:
         """Thay nội dung bong bóng bằng một dòng thông báo."""
@@ -244,8 +260,8 @@ class MainWindow(QWidget):
         self._arm_hide()
 
     def _arm_hide(self) -> None:
-        if not self.is_speaking:
-            self.hide_timer.start()
+        if not self.is_speaking:   # giữ chữ 5-10 s sau khi nói xong, câu dài giữ lâu hơn
+            self.hide_timer.start(min(BUBBLE_MAX_MS, max(BUBBLE_MS, 2000 + 80 * len(self.vi_label.text()))))
 
     def _hide_bubble(self) -> None:
         if self.recording:
@@ -253,6 +269,7 @@ class MainWindow(QWidget):
         self.vi_label.clear()
         self.ja_label.clear()
         self._show_bubble()
+        self._sink()
 
     def show_input(self) -> None:
         self.row.show()
@@ -263,6 +280,7 @@ class MainWindow(QWidget):
     def hide_input(self) -> None:
         self.row.hide()
         self._fit()
+        self._sink()
 
     def toggle_input(self) -> None:
         self.show_input() if self.row.isHidden() else self.hide_input()
@@ -422,6 +440,8 @@ class MainWindow(QWidget):
         self.input.setEnabled(True)
         if not self.row.isHidden():
             self.input.setFocus()
+        if self.bubble.isHidden():   # lượt liếc im lặng / lỗi không báo: không có hẹn giờ ẩn nào sẽ cho lặn
+            self._sink()
 
     def greet(self, wait_ready) -> None:
         """Chào một câu khi wait_ready(stop_event) xong (chạy ở thread nền, không chặn giao diện)."""
@@ -433,7 +453,7 @@ class MainWindow(QWidget):
     def _looking(self) -> bool:
         return self.look_job is not None and self.look_job.isRunning()
 
-    def look(self, question: str = "", proactive: bool = False) -> None:
+    def look(self, question: str = "", proactive: bool = False, cpu: bool = False) -> None:
         """Chụp màn hình (thread giao diện) -> model ảnh local tóm tắt (thread nền) -> lượt ẩn gửi cho LLM."""
         if self._looking() or (self.worker is not None and self.worker.isRunning()):
             return
@@ -441,7 +461,7 @@ class MainWindow(QWidget):
             jpeg = self.grab()
         except Exception as e:
             return None if proactive else self._note(f"(lỗi) không nhìn được màn hình: {e}")
-        self.look_job = Job(lambda: self.describe(jpeg, self.cfg, question))
+        self.look_job = Job(lambda: self.describe(jpeg, self.cfg, question, cpu=cpu))
         self.look_job.done.connect(lambda summary: self._looked(summary, question, proactive))
         self.look_job.failed.connect(lambda m: proactive or self._note(f"(lỗi) không nhìn được màn hình: {m}"))
         self.look_job.start()
@@ -456,8 +476,10 @@ class MainWindow(QWidget):
                 return
             self.send_text(
                 f"(Màn hình: {s})\nLần liếc trước bạn thấy: {self.last_seen or 'chưa liếc lần nào'}. "
-                "Nếu họ đang làm việc khác hẳn lần trước hoặc có gì đáng hỏi han, trêu hay quan tâm thì nói ĐÚNG MỘT "
-                "câu ngắn đúng tính cách; nếu vẫn như cũ hoặc không có gì đáng nói thì im lặng bằng cách chỉ xuất một "
+                "Nếu có gì đáng nói (họ chuyển sang việc khác, cảnh phim/trận game/bài đăng/trang truyện thú vị, "
+                "hay họ cần được quan tâm) thì nói 1-2 câu ngắn đúng tính cách, như đang ngồi cạnh xem cùng; "
+                f"lần này thử kiểu: {random.choice(GLANCE_ANGLES)} (gượng thì chọn kiểu khác). Nếu vẫn như cũ "
+                "và đã bình luận rồi thì im lặng bằng cách chỉ xuất một "
                 'dòng {"mood":"normal","ja":"","vi":""}. Không thực hiện hành động nào.', quiet=True)
             self.last_seen = s
         else:
@@ -478,11 +500,12 @@ class MainWindow(QWidget):
         """Hẹn giờ: thỉnh thoảng liếc màn hình nếu người dùng còn ở đó và GPU không bận."""
         v = self.cfg["vision"]
         if (not self.vision_on or self.recording or self.is_speaking or self._busy() or self._looking()
-                or not vision.should_glance(vision.idle_seconds(), vision.vram_used_mb(),
-                                            v["interval_min"] * 60, v["max_vram_mb"])
+                or not vision.should_glance(vision.idle_seconds(), v["interval_min"] * 60,
+                                            vision.foreground_fullscreen())
                 or vision.is_private(vision.foreground_title(), v.get("private_titles", []))):
             return
-        self.look(proactive=True)
+        # GPU đang bận (chơi game) -> model ảnh chạy CPU, chậm hơn nhưng không giành VRAM của game
+        self.look(proactive=True, cpu=(vision.vram_used_mb() or 0) > v["max_vram_mb"])
 
     def do_action(self, action: str, arg: str) -> None:
         if action == "look":

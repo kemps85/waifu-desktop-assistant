@@ -3,6 +3,7 @@ import ctypes
 import json
 import subprocess
 import urllib.request
+from ctypes import wintypes
 
 from PySide6.QtCore import QBuffer, QIODevice, Qt
 from PySide6.QtGui import QGuiApplication
@@ -23,14 +24,16 @@ def grab_screen(width: int = 1280) -> bytes:
     return bytes(buf.data())
 
 
-def describe(jpeg: bytes, cfg: dict, question: str = "") -> str:
-    """Nhờ model ảnh local (Ollama) tóm tắt màn hình; ảnh không rời máy. Lỗi mạng/HTTP -> raise."""
+def describe(jpeg: bytes, cfg: dict, question: str = "", cpu: bool = False) -> str:
+    """Nhờ model ảnh local (Ollama) tóm tắt màn hình; ảnh không rời máy. Lỗi mạng/HTTP -> raise.
+    cpu=True: chạy trên CPU (num_gpu 0) để không giành VRAM khi đang chơi game."""
     v = cfg["vision"]
     prompt = _PROMPT if not question else (
         f"{_FIRST} Trả lời ngắn gọn bằng tiếng Việt câu hỏi sau dựa trên ảnh: {question}. Không chép lại mật khẩu hay mã.")
+    options = {"num_ctx": 4096, "temperature": 0.2, **({"num_gpu": 0} if cpu else {})}
     body = {
         "model": v["model"], "stream": False, "keep_alive": 0, "think": False,   # keep_alive 0: nhả VRAM ngay
-        "options": {"num_ctx": 4096, "temperature": 0.2},
+        "options": options,
         "messages": [{"role": "user", "content": prompt, "images": [base64.b64encode(jpeg).decode()]}],
     }
     req = urllib.request.Request(v["base_url"].rstrip("/") + "/api/chat", json.dumps(body).encode(),
@@ -77,6 +80,30 @@ def is_private(title: str, words: list[str]) -> bool:
     return any(w and w.lower() in low for w in words)
 
 
-def should_glance(idle_s: float, vram_mb: int | None, interval_s: float, max_vram_mb: int) -> bool:
-    """Không liếc khi người dùng đã đi vắng (idle quá một chu kỳ) hoặc GPU đang bận (đang chơi game)."""
-    return not (idle_s > interval_s or (vram_mb is not None and vram_mb > max_vram_mb))
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", ctypes.c_uint)]
+
+
+def foreground_fullscreen() -> bool:
+    """Cửa sổ phía trước phủ kín màn hình (game, phim, video toàn màn hình); desktop không tính."""
+    try:
+        u = ctypes.windll.user32
+        h = u.GetForegroundWindow()
+        cls = ctypes.create_unicode_buffer(64)
+        u.GetClassNameW(h, cls, 64)
+        if not h or cls.value in ("Progman", "WorkerW", "Shell_TrayWnd"):
+            return False
+        r, mi = wintypes.RECT(), _MONITORINFO(ctypes.sizeof(_MONITORINFO))
+        u.GetWindowRect(h, ctypes.byref(r))
+        u.GetMonitorInfoW(u.MonitorFromWindow(h, 2), ctypes.byref(mi))   # 2 = MONITOR_DEFAULTTONEAREST
+        m = mi.rcMonitor
+        return r.left <= m.left and r.top <= m.top and r.right >= m.right and r.bottom >= m.bottom
+    except Exception:
+        return False
+
+
+def should_glance(idle_s: float, interval_s: float, fullscreen: bool) -> bool:
+    """Không liếc khi người dùng đã đi vắng (idle quá một chu kỳ); xem phim/chơi game toàn màn hình
+    thì không chạm chuột vẫn tính là đang ở đó."""
+    return fullscreen or idle_s <= interval_s
