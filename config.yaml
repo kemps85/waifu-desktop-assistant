@@ -1,0 +1,67 @@
+character: remielle
+
+llm:
+  active: deepseek          # deepseek | openai | ollama — đổi dòng này để đổi bộ não
+  temperature: 0.8
+  max_tokens: 400
+  max_history: 20
+  providers:
+    deepseek:
+      base_url: https://api.deepseek.com
+      model: deepseek-flash
+      api_key_env: DEEPSEEK_API_KEY
+      extra_body: {thinking: {type: disabled}}
+    openai:
+      base_url: https://api.openai.com/v1
+      model: gpt-6-luna
+      api_key_env: OPENAI_API_KEY
+      extra_body: {reasoning_effort: none}
+    ollama:
+      base_url: http://localhost:11434/v1
+      model: waifu-gemma
+      api_key_env: ""        # local, không cần key
+      extra_body: {reasoning_effort: none}
+
+tts:
+  base_url: http://127.0.0.1:5000
+  model_name: remielle
+  style: Neutral
+  styles: {happy: Happy, shy: Shy, pout: Pout, worried: Worried, sad: Sad, determined: Determined}   # mood -> kiểu giọng (tạo bằng scripts/make_voice_styles.py)
+  style_weight: 10         # độ đậm cảm xúc: dưới 6 gần như không khác, 10-12 rõ, 20 dễ đều đều/vỡ giọng; 0 = tắt
+  sdp_ratio: 0.5           # ngữ điệu: 0.2 = đều đều, 0.5-0.7 = lên xuống nhiều hơn (cao quá dễ đọc méo)
+  timeout_s: 30
+
+stt:
+  model: large-v3-turbo
+  device: cuda              # đổi thành cpu khi llm.active là ollama (nhường VRAM)
+  compute_type: int8
+  language: vi
+  prompt: "Remielle ơi, mở Chrome, YouTube, Discord, Steam, Zalo, Telegram giúp tớ. Tắt Honkai Star Rail đi."   # gợi ý tên riêng cho Whisper, thêm tên app hay dùng vào đây
+  save_last: data/last_mic.wav   # bản thu gần nhất (ghi đè mỗi lần), để chẩn đoán nghe sai; xoá dòng này để tắt
+
+memory:
+  enabled: true            # T18 bật lên
+  db_path: data/memory.db
+  embed_base_url: http://localhost:11434/v1
+  embed_model: bge-m3
+  top_k: 5
+  dedupe_threshold: 0.9
+
+ui:
+  talk_key: right_ctrl     # right_ctrl | right_alt | f2..f12 — giữ để nói, hoạt động cả khi đang ở app khác
+  top_key: right_alt       # nhấn một lần: Remielle nổi lên trên mọi cửa sổ; nhấn lần nữa: lùi xuống dưới cho khỏi vướng
+  on_top: false            # true = mở lên đã ở chế độ luôn ở trên
+  english: false           # true = mở lên ở chế độ luyện tiếng Anh (đổi nhanh: chuột phải vào chibi)
+  greet: true             # chào khi mở
+
+vision:
+  enabled: true            # thỉnh thoảng liếc màn hình rồi hỏi han (tắt nhanh: chuột phải vào chibi)
+  interval_min: 6          # mấy phút liếc một lần
+  max_vram_mb: 7000        # GPU đang dùng nhiều hơn mức này (đang chơi game) thì không liếc
+  base_url: http://localhost:11434
+  model: gemma4:e4b        # model local đọc ảnh; ảnh không rời máy
+  timeout_s: 120
+  private_titles: [bank, banking, ngân hàng, vietcombank, techcombank, mbbank, tpbank, momo, zalopay, paypal, binance, wallet, password, mật khẩu, bitwarden, 1password, keepass, incognito, inprivate, ẩn danh, private, zalo, messenger, telegram, gmail, outlook]   # cửa sổ đang mở có tiêu đề chứa các từ này thì không tự liếc
+
+actions:
+  confirm: true           # hỏi lại trước khi chạy lệnh tuỳ ý / tắt máy / khởi động lại

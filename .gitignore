@@ -1,0 +1,19 @@
+.env
+.venv/
+data/
+models/
+vendor/
+__pycache__/
+.pytest_cache/
+.uv-cache/
+pytest-of-PC/
+
+# ghi chú làm việc riêng, shortcut trỏ đường dẫn trên máy mình
+HANDOFF.md
+PLAN.md
+tasks/
+*.lnk
+
+# ảnh nhân vật thuộc bản quyền HoYoverse: tự bỏ ảnh của bạn vào characters/<tên>/images/
+characters/*/images/
+voice_source/
